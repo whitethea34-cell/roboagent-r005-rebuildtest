@@ -1,0 +1,104 @@
+# ============================================================
+# R005 (Jetson Orin NX) Docker Compose
+#
+# 镜像:
+#   docker build -t qwen35-2b:r005 -f qwen35.Dockerfile .
+#   docker build -t robobrain:r005 -f robobrain.Dockerfile .
+#
+# 启动:
+#   docker compose -f docker-compose.r005.yml up -d qwen35
+#   docker compose -f docker-compose.r005.yml up -d robobrain
+# ============================================================
+
+version: "3.8"
+
+services:
+  qwen35:
+    image: qwen35-2b:r005
+    container_name: r005-qwen35
+    runtime: nvidia
+    network_mode: "host"
+    restart: unless-stopped
+
+    volumes:
+      - /home/niic/Desktop/r005Test/models:/app/models:ro
+      - ./logs:/app/logs
+      - /usr/local/cuda-12.6/targets/aarch64-linux/lib:/usr/local/cuda/lib:ro
+
+    command: >
+      -m /app/models/qwen3_5/Qwen3.5-2B-Q4_K_M.gguf
+      --host 0.0.0.0
+      --port 8081
+      --ctx-size 8192
+      --threads 6 --threads-batch 6
+      --batch-size 512 --ubatch-size 256
+      --n-gpu-layers 99
+      --cache-type-k q8_0 --cache-type-v q8_0
+      --flash-attn on
+      --reasoning off
+      --verbose
+
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=0
+      - LD_LIBRARY_PATH=/app:/usr/local/cuda/lib
+
+  robobrain:
+    image: robobrain:r005
+    container_name: r005-robobrain
+    runtime: nvidia
+    network_mode: "host"
+    restart: unless-stopped
+
+    volumes:
+      - /home/niic/Desktop/r005Test/models:/app/models:ro
+      - ./logs:/app/logs
+      - /usr/local/cuda-12.6/targets/aarch64-linux/lib:/usr/local/cuda/lib:ro
+
+    command: >
+      -m /app/models/RoboBrain2.5-4B-GGUF/RoboBrain2.5-4B.Q4_K_M.gguf
+      --host 0.0.0.0
+      --port 8082
+      --ctx-size 8192
+      --threads 6 --threads-batch 6
+      --batch-size 512 --ubatch-size 256
+      --n-gpu-layers 99
+      --cache-type-k q8_0 --cache-type-v q8_0
+      --flash-attn on
+      --verbose
+
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=0
+      - LD_LIBRARY_PATH=/app:/usr/local/cuda/lib
+
+  qwen35-08b:
+    image: qwen35-2b:r005            # 同一镜像（仅模型文件不同）
+    container_name: r005-qwen35-08b
+    runtime: nvidia
+    network_mode: "host"
+    restart: unless-stopped
+
+    volumes:
+      - /home/niic/Desktop/r005Test/models:/app/models:ro
+      - ./logs:/app/logs
+      - /usr/local/cuda-12.6/targets/aarch64-linux/lib:/usr/local/cuda/lib:ro
+
+    command: >
+      -m /app/models/Qwen3.5-0.8B-Q4_K_M.gguf
+      --host 0.0.0.0
+      --port 8083
+      --ctx-size 4096
+      --threads 4 --threads-batch 4
+      --batch-size 512 --ubatch-size 256
+      --n-gpu-layers 99
+      --cache-type-k q8_0 --cache-type-v q8_0
+      --flash-attn on
+      --reasoning off
+      --no-mmap --mlock --prio 1
+      --verbose
+
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=0
+      - LD_LIBRARY_PATH=/app:/usr/local/cuda/lib
