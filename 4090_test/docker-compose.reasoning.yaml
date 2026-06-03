@@ -1,0 +1,18 @@
+services:
+  qwen35-08b:
+    command: >
+      -m /app/models/Qwen3.5-0.8B-Q4_K_M.gguf
+      --host 0.0.0.0
+      --port 8080
+      --ctx-size 4096
+      --threads 8
+      --threads-batch 8
+      --batch-size 4096
+      --ubatch-size 1024
+      --n-gpu-layers 99
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+      --flash-attn on
+      --no-mmap
+      --reasoning on
+      --verbose

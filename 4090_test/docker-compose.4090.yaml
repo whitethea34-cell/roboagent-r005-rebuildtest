@@ -1,0 +1,194 @@
+# ============================================================
+# 4090 WSL 统一推理服务 (3 模型)
+#
+# 镜像: docker build -t roboagent:4090-cuda -f ../4090.Dockerfile .
+#
+# 启动: docker compose -f docker-compose.4090.yaml up -d
+# 停止: docker compose -f docker-compose.4090.yaml down
+# 日志: docker compose -f docker-compose.4090.yaml logs -f
+#
+# 端口映射 (匹配 test_interactive.py / run_benchmark.py 的硬编码端口):
+#   Qwen3.5-2B:     8081  (对话/规划/视觉)
+#   RoboBrain2.5-4B: 8082  (推理/规划)
+#   Qwen3.5-0.8B:   8083  (超轻量快速推理)
+#
+# 模型路径 (Windows → WSL):
+#   E:\Claude_roboagent\llm-r005\models\            → /mnt/e/.../llm-r005/models
+#   E:\Claude_roboagent\r005_rebuildtest\Qwen3.5-0.8B-GGUF\ → /mnt/e/.../r005_rebuildtest/Qwen3.5-0.8B-GGUF
+# ============================================================
+
+services:
+  # ==========================================================
+  # Qwen3.5-2B (多模态 VLM, 轻量对话/场景理解/规划)
+  # ==========================================================
+  qwen35-2b:
+    image: roboagent:4090-cuda
+    container_name: qwen35-4090
+    hostname: 4090-qwen35
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:8081:8080"
+      - "192.168.110.143:8081:8080"
+
+    volumes:
+      - /mnt/e/Claude_roboagent/llm-r005/models:/app/models:ro
+      - /mnt/e/Projects/r005Test/models:/mnt/e/Projects/r005Test/models:ro
+      - ./logs:/app/logs
+
+    command: >
+      -m /app/models/Qwen3.5-2B-Q4_K_M.gguf
+      --mmproj /app/models/mmproj-F16.gguf
+      --host 0.0.0.0
+      --port 8080
+      --ctx-size 8192
+      --threads 8
+      --threads-batch 8
+      --batch-size 4096
+      --ubatch-size 1024
+      --n-gpu-layers 99
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+      --flash-attn on
+      --no-mmap
+      --reasoning off
+      --verbose
+
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - TZ=Asia/Shanghai
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    networks:
+      - 4090-net
+
+  # ==========================================================
+  # RoboBrain2.5-4B (具身推理/长链规划)
+  # ==========================================================
+  robobrain:
+    image: roboagent:4090-cuda
+    container_name: robobrain-4090
+    hostname: 4090-robobrain
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:8082:8080"
+      - "192.168.110.143:8082:8080"
+
+    volumes:
+      - /mnt/e/Claude_roboagent/llm-r005/models:/app/models:ro
+      - /mnt/e/Projects/r005Test/models:/mnt/e/Projects/r005Test/models:ro
+      - ./logs:/app/logs
+
+    command: >
+      -m /app/models/RoboBrain2.5-4B.Q4_K_M.gguf
+      --host 0.0.0.0
+      --port 8080
+      --ctx-size 8192
+      --threads 8
+      --threads-batch 8
+      --batch-size 4096
+      --ubatch-size 1024
+      --n-gpu-layers 99
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+      --flash-attn on
+      --no-mmap
+      --verbose
+
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - TZ=Asia/Shanghai
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    networks:
+      - 4090-net
+
+  # ==========================================================
+  # Qwen3.5-0.8B (超轻量 VLM, 快速推理)
+  # ==========================================================
+  qwen35-08b:
+    image: roboagent:4090-cuda
+    container_name: qwen35-08b-4090
+    hostname: 4090-qwen35-08b
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:8083:8080"
+      - "192.168.110.143:8083:8080"
+
+    volumes:
+      - /mnt/e/Claude_roboagent/llm-r005/models:/app/models:ro
+      - /mnt/e/Projects/r005Test/models:/mnt/e/Projects/r005Test/models:ro
+      - ./logs:/app/logs
+
+    command: >
+      -m /app/models/Qwen3.5-0.8B-GGUF/Qwen3.5-0.8B-Q4_K_M.gguf
+      --host 0.0.0.0
+      --port 8080
+      --ctx-size 4096
+      --threads 8
+      --threads-batch 8
+      --batch-size 4096
+      --ubatch-size 1024
+      --n-gpu-layers 99
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+      --flash-attn on
+      --no-mmap
+      --reasoning off
+      --verbose
+
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - TZ=Asia/Shanghai
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    networks:
+      - 4090-net
+
+networks:
+  4090-net:
+    driver: bridge

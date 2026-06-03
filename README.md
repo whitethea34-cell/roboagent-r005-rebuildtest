@@ -32,12 +32,15 @@
 ### 4090 (Docker)
 
 ```bash
-# 构建
-docker build -t qwen35-2b:4090 -f llm-r005/qwen35.Dockerfile .
-docker build -t robobrain:4090 -f llm-r005/robobrain.Dockerfile .
+# 构建（预编译镜像，包含 CUDA 和 FORCE_MMQ 优化）
+docker build -t roboagent:4090-cuda -f ../4090.Dockerfile .
 
-# 启动
-docker compose -f llm-r005/docker-compose.yml up -d
+# 启动全部 3 个模型服务
+docker compose -f 4090_test/docker-compose.4090.yaml up -d
+
+# 测试
+bash 4090_test/test_4090.sh check       # 健康检查
+bash 4090_test/test_4090.sh dialogue    # 对话测试
 ```
 
 ### R005 (Docker — 推荐)
@@ -114,10 +117,13 @@ r005_rebuildtest/
 ├── docker-compose.r005.yml    ← R005 Docker Compose 配置
 ├── qwen35.Dockerfile          ← Qwen3.5-2B 镜像构建
 ├── robobrain.Dockerfile       ← RoboBrain2.5-4B 镜像构建
-├── test_interactive.py        ← 交互式对话测试
+├── test_interactive.py        ← 交互式对话测试（含 HRI 优先规划器 + KV Cache）
 ├── test_services.sh           ← 服务健康检查
 ├── run_benchmark.py           ← 基准测试
 ├── run_agent_test.py          ← Agent 流程测试
+├── 4090_test/                 ← 4090 WSL 独立测试套件
+│   ├── docker-compose.4090.yaml  ← 3 模型统一编排（8081/8082/8083）
+│   └── test_4090.sh              ← 快速测试入口
 ├── R005_操作指南.md              ← 中文操作指南
 ├── DEPLOY_R005.md             ← 部署说明
 ├── Dockerfile                 ← (废弃，使用 qwen35.Dockerfile / robobrain.Dockerfile)
@@ -138,16 +144,19 @@ r005_rebuildtest/
 7. **模型文件路径注意分隔符**: RoboBrain 文件名为 `RoboBrain2.5-4B.Q4_K_M.gguf`（点分隔），非 `-`
 8. **0.8B 模型用小 batch 配置**: 4 threads + 4096 ctx-size + no-mmap + mlock，追求极低延迟
 9. **.dockerignore 必不可少**: llama.cpp 编译产物含大量 .so symlink，不加 .dockerignore 会导致构建上下文达 666MB
+10. **提示词模板直接影响推理延迟**: 压缩 82%（2500→460 tokens）配合 KV Cache 复用，端到端延迟显著降低
+11. **HRI 优先分解**: 任务规划前先判断人机交互场景，决定是否需要 APPROACH/REPORT/SPEAK 社交步骤
 
 ---
 
 ## 后续优化方向
 
 1. **Phase 0**: 去 MMQ 参数调优已完成，基准测试进行中
-2. **Phase 0.5**: Qwen3.5-0.8B 轻量模型部署 + 简单问答场景测试
-3. **Phase 1**: 推理管线优化（token 压缩、KV Cache 复用）
-4. **Phase 2**: 量化方案对比（Q8_0 vs Q4_K_M）
-5. **Phase 3**: TensorRT 加速（Jetson 视觉 encoder）
+2. **Phase 0.5**: Qwen3.5-0.8B 轻量模型部署已完成
+3. **Phase 0.7**: ✅ 提示词模板优化 — HRI 优先分解 + 80% 压缩 + KV Cache 复用
+4. **Phase 1**: 推理管线优化（token 压缩、KV Cache 深度集成）
+5. **Phase 2**: 量化方案对比（Q8_0 vs Q4_K_M）
+6. **Phase 3**: TensorRT 加速（Jetson 视觉 encoder）
 
 详见 [task_plan.md](../task_plan.md)，优化历程详见 [R005_OPTIMIZATION_REPORT.md](./R005_OPTIMIZATION_REPORT.md)。
 

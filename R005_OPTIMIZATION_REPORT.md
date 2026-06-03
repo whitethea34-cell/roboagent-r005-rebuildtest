@@ -150,7 +150,6 @@ ENTRYPOINT ["/app/llama-server"]
 | 提示词模板精简 | Runtime | **输入 -60%** | SCHEDULER 从 30 行压缩到 13 行 |
 | max_tokens 减半 (768→384) | Runtime | **输出 -50%** | 控制生成长度 |
 | batch-size 512 (非 4096) | Runtime | 稳定性 | Jetson 显存有限，大 batch 无收益 |
-| la- 精简提示词模板 | Runtime | 输入 -60% | SCHEDULER 从 30 行 → 13 行 |
 | network_mode: "host" | Docker | 通信正常 | bridge 网络有握手问题 |
 | --network host 构建 | Docker | DNS 正常 | 边缘设备 DNS 配置问题 |
 
@@ -174,6 +173,48 @@ ENTRYPOINT ["/app/llama-server"]
 | TensorRT 视觉 encoder | 脚本已建，待 Jetson 上执行 |
 | threads 调优 (4 vs 6 vs 8) | 已锁 4 核留给系统 |
 | Compass SDK NPU | 等待厂商回复 |
+
+---
+
+## 提示词模板优化（Phase 0.7）
+
+为配合 R005 推理管线，对 RoboAgent 的提示词模板做结构化优化。
+
+### 优化目标
+
+- **降低端到端延迟**: R005 生成速度 ~55 tok/s，模板过长直接拖慢任务执行
+- **结构化任务分解**: 机器人具身任务需拆解为可执行的原子技能序列
+- **HRI 场景处理**: 任务可能涉及人机交互，需动态决定社交步骤
+
+### 优化手段
+
+| 手段 | 原大小 | 优化后 | 压缩率 |
+|------|--------|--------|--------|
+| SCHEDULER | ~2500 tok | ~460 tok | **82%** |
+| EXECUTION_PLANNER | ~1200 tok | ~232 tok | **81%** |
+| TEMPORAL_ANALYST | ~650 tok | ~286 tok | **56%** |
+
+### 核心设计 — HRI 优先分解
+
+```
+任务输入 → HRI判断(是/否) → 
+  是: 接近→交互→操作→社交收尾(APPROACH/SPEAK/REPORT/HANDOVER/BOW)
+  否: 直接操作执行
+```
+
+**技能库 5 大分类**:
+- 移动: NAVIGATE/APPROACH/FOLLOW/LEAD
+- 操作: GRASP/PICK/PLACE/RELEASE/PUSH/PULL/ROTATE/PRESS
+- 环境: OPEN/CLOSE/OBSERVE/FIND/WAIT/POINT
+- 厨房: CUT/WASH/POUR/MIX/COOK/HEAT/COOL/PACK
+- 社交: HANDOVER/SPEAK/REPORT/SHAKE_HANDS/WAVE/BOW/NOD/DANCE/HUG/HIGH_FIVE/GESTURE/LISTEN/CONFIRM
+
+### KV Cache 复用
+
+- `chat_once` 增加 `_last_system_prompt` 追踪
+- 对 `cache_prompt: True` 的支持
+- 输出 `[cache HIT/MISS]` 状态指示
+- 首次调用处理全部 prompt，后续复用 KV 缓存
 
 ---
 

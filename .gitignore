@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+*_env/
+*_env_*/
+
+# Model weights
+*.gguf
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx
+
+# Pre-downloaded models
+Qwen3.5-0.8B-GGUF/
+
+# Archives
+*.zip
+*.tar.gz
+*.7z
+*.tar
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+*.secret
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
+logs/
+*.log
+benchmark_*.txt
+benchmark_*.json
+
+# Test images
+pic/
+
+# Study notes
+studynote/

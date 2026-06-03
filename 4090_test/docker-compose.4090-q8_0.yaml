@@ -1,0 +1,75 @@
+# ============================================================
+# 4090 WSL — Qwen3.5-0.8B Q8_0 量化精度测试
+#
+# 与主 docker-compose.4090.yaml 的区别：
+#   - 只启动 qwen35-08b 服务（不影响 8081/8082）
+#   - 使用 Q8_0 量化模型替代 Q4_K_M
+#   - 端口 8083
+#
+# 启动前先停掉旧的 Q4_K_M 容器：
+#   docker compose -f docker-compose.4090.yaml stop qwen35-08b
+#
+# 启动 Q8_0：
+#   docker compose -f docker-compose.4090-q8_0.yaml up -d
+#
+# 测试完成后恢复 Q4_K_M：
+#   docker compose -f docker-compose.4090-q8_0.yaml down
+#   docker compose -f docker-compose.4090.yaml start qwen35-08b
+# ============================================================
+
+services:
+  qwen35-08b:
+    image: roboagent:4090-cuda
+    container_name: qwen35-08b-q8_0-4090
+    hostname: 4090-qwen35-08b-q8_0
+    restart: "no"
+
+    ports:
+      - "8083:8080"
+
+    volumes:
+      - /mnt/e/Projects/eriq-eval/models/Qwen:/app/models:ro
+      - ./logs:/app/logs
+
+    command: >
+      -m /app/models/Qwen3.5-0.8B-Q8_0.gguf
+      --host 0.0.0.0
+      --port 8080
+      --ctx-size 4096
+      --threads 8
+      --threads-batch 8
+      --batch-size 4096
+      --ubatch-size 1024
+      --n-gpu-layers 99
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+      --flash-attn on
+      --no-mmap
+      --reasoning off
+      --verbose
+
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - TZ=Asia/Shanghai
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    networks:
+      - 4090-net
+
+networks:
+  4090-net:
+    driver: bridge

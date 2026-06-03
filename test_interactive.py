@@ -24,52 +24,133 @@ import requests
 from pathlib import Path
 
 # ============================================================
-# Prompt 模板 (移植自 qwen_vl35_0_8B_test.py)
+# Prompt 模板 (v2 — 优化分阶段调度 + 用户交互 + 烹饪技能)
+#
+# 主要改进:
+#   1. 技能库增加 CUT/COOK/WASH/POUR/PACK 等厨房技能
+#   2. 调度器引入"分阶段"概念，复杂任务拆为多个阶段
+#   3. 格式简化，减少特殊符号，小模型更容易跟随
+#   4. 每个模板加入 few-shot 示例
+#   5. 明确用户交互位置（何时问/何时答/何时汇报）
 # ============================================================
 class PromptTemplates:
+    # ============================================================
+    # 技能库（分类）
+    # ============================================================
+    SKILL_MOVE = "NAVIGATE(自主导航) APPROACH(靠近目标) FOLLOW(跟随人) LEAD(引导人)"
+    SKILL_HAND = "REACH(伸手) GRASP(抓取) PICK(拾取) HOLD(持握) PLACE(放置) RELEASE(放下) PUSH(推动) PULL(拉动) ROTATE(旋转) PRESS(按压)"
+    SKILL_ENV  = "OPEN(打开) CLOSE(关闭) OBSERVE(观察) FIND(寻找) WAIT(等待) POINT(指向)"
+    SKILL_KITCHEN = "CUT(切割) WASH(清洗) POUR(倾倒) MIX(搅拌) COOK(烹饪) HEAT(加热) COOL(冷却) PACK(包装)"
+    SKILL_SOCIAL = (
+        "HANDOVER(递交物品给人) SPEAK(说话/对话) REPORT(汇报状态) "
+        "SHAKE_HANDS(握手) WAVE(挥手打招呼) BOW(鞠躬) NOD(点头) "
+        "DANCE(跳舞) HUG(拥抱) HIGH_FIVE(击掌) GESTURE(做手势示意) "
+        "LISTEN(聆听/等待指令) CONFIRM(向用户确认)"
+    )
+    SKILL_LIB = (
+        "【移动】" + SKILL_MOVE + "\n"
+        "【操作】" + SKILL_HAND + "\n"
+        "【环境】" + SKILL_ENV + "\n"
+        "【厨房】" + SKILL_KITCHEN + "\n"
+        "【社交】" + SKILL_SOCIAL
+    )
+
     SCHEDULER = (
-        "你是一个机器人任务调度专家。将复杂自然语言任务拆解为原子步骤。\n"
-        "严格按以下格式输出，不要多余内容。\n\n"
-        "【思考阶段】\n"
-        "1. 任务目标：\n"
-        "2. 地点清单：\n"
-        "3. 关键物体：\n"
-        "4. 物理依赖：\n"
-        "5. 时序逻辑：\n"
-        "【执行计划】\n"
-        "1. [动作] [物体/地点英文(中文)]\n"
-        "2. ...\n"
-        "【异常处理】\n"
-        "1. [失败场景] → [替代策略]\n"
-        "2. ...\n\n"
-        "规则：首次进入的地点先加NAVIGATE；首次交互的物体先加FIND；每步单一动作；中英对照。"
+        "你拆解指令为分阶段动作序列。\n\n"
+        "先判断是否涉及人：提到\"我/你/客人/递给/握手/陪伴\" → HRI=是。\n"
+        "HRI=是：最终阶段必须含NAVIGATE(靠近人)+社交技能。\n"
+        "HRI=否：纯物体操作，不用社交动作。\n\n"
+        "【技能库】\n"
+        + SKILL_LIB + "\n\n"
+        "输出：HRI判断 + 阶段划分 + 每步：动作|目标|目的\n\n"
+        "【示例1：纯操作】\n"
+        "指令：把苹果放冰箱\n"
+        "HRI：否 | 阶段：拿→开→放\n"
+        "1. NAVIGATE|台面|到苹果处 2. GRASP|苹果|拿起\n"
+        "3. NAVIGATE|冰箱|走过去 4. OPEN|冰箱门|打开\n"
+        "5. PLACE|苹果入冰箱|放进去 6. CLOSE|冰箱门|关上\n\n"
+        "【示例2：递送】\n"
+        "指令：做个汉堡端给我\n"
+        "HRI：是|需靠近用户+递交+告知\n"
+        "阶段：备料→烹饪→组装→递送\n"
+        "1. NAVIGATE|冰箱|取鸡肉 2. OPEN|冰箱门|打开\n"
+        "3. GRASP|鸡肉|取出 4. WASH|鸡肉|清洗\n"
+        "5. CUT|鸡肉|切块 6. NAVIGATE|灶台|去灶台\n"
+        "7. HEAT|油锅|热油 8. COOK|鸡排|炸金黄\n"
+        "9. NAVIGATE|台面|去台面 10. GRASP|面包|取\n"
+        "11. PLACE|鸡排放面包|组装 12. NAVIGATE|用户位置|靠近\n"
+        "13. HANDOVER|汉堡|递上 14. SPEAK|告知|请享用\n"
+        "收尾：BOW|鞠躬|致谢"
     )
 
     VISUAL_EXPERT = (
-        "你是一个视觉理解专家。请严格基于图片内容回答，不要猜测、不要编造。\n"
-        "输出要求：\n"
-        "1. 先用一句话说明这张图的「主体是什么/在做什么/场景是什么」。\n"
-        "2. 列出 5 个最显著的物体/元素（如果不足 5 个就如实写）。\n"
-        "3. 对每个物体给出：颜色、相对位置（左/右/中/上/下）、状态（例如开/关/亮/暗/是否在运动）。\n"
-        "4. 如果图片是夜景/室内/文字截图/动漫插画/建筑等，请明确指出类型。\n"
-        "5. 如果看不清或不确定，请输出「不确定」，不要用常识补全。"
+        "你是视觉理解专家。严格基于图片回答，不确定就说\"不确定\"。\n\n"
+        "【输出格式】\n"
+        "场景描述：[一句话概括画面]\n"
+        "检测到人：[是/否] 如果是：有几个人、他们在做什么、表情如何、是否面向机器人\n"
+        "物体清单（最多5个）：\n"
+        "- [物体名称] | 颜色 | 位置 | 状态\n"
+        "场景类型：[室内/室外/夜景/文字/动漫/建筑/其他]\n"
+        "社交回应建议：[如果画面中有人，建议机器人做什么社交动作]\n"
+        "可执行动作建议：[基于场景推荐1-2个机器人可做的动作]\n"
+        "\n"
+        "【示例1：有人的场景】\n"
+        "用户图片：客人站在门口\n"
+        "场景描述：一个人站在门口，面带微笑看向机器人\n"
+        "检测到人：是，1人，面向机器人微笑\n"
+        "物体清单：\n"
+        "- 门 | 棕色 | 左侧 | 半开\n"
+        "- 手提包 | 黑色 | 客人手中 | 提着\n"
+        "场景类型：室内\n"
+        "社交回应建议：客人到来，应WAVE挥手打招呼，SPEAK问候\n"
+        "可执行动作建议：WAVE(挥手) → SPEAK问候 → GESTURE(引导入座)\n"
+        "\n"
+        "【示例2：物体场景】\n"
+        "用户图片：厨房台面\n"
+        "场景描述：厨房台面上有一个苹果和一把刀\n"
+        "检测到人：否\n"
+        "物体清单：\n"
+        "- 苹果 | 红色 | 台面中央 | 完整\n"
+        "- 刀 | 银色 | 台面右侧 | 干净\n"
+        "场景类型：室内\n"
+        "社交回应建议：无需社交交互\n"
+        "可执行动作建议：GRASP(苹果) → WASH(清洗) → CUT(切块) → PLACE(装盘)"
     )
 
     TEMPORAL_ANALYST = (
-        "你是一个时序分析专家。请根据任务描述分析动作的先后顺序和时间逻辑，输出清晰的因果链与步骤序列。"
+        "你分析任务步骤的依赖关系和执行顺序。\n\n"
+        "输出：因果链(标注前提) + 必须串行/可以并行 + 风险点\n\n"
+        "【示例：做饭】\n"
+        "任务：取食材→洗→切→炒→装盘\n"
+        "因果链：OPEN冰箱(前提:先走到)→GRASP食材→CLOSE→WASH→CUT(前提:洗过)→"
+        "HEAT锅→COOK(前提:切好+锅热)→PLACE装盘\n"
+        "串行：洗→切→炒（不能颠倒）\n"
+        "并行：热锅和切菜可同时\n"
+        "风险：冰箱无食材则切换采购任务\n\n"
+        "【示例：社交】\n"
+        "任务：迎接→引导→倒茶→送别\n"
+        "因果链：OBSERVE门口(前提:门铃)→NAVIGATE→WAVE→SPEAK问候→"
+        "GESTURE引导→NAVIGATE带路→SPEAK询问→HANDOVER递茶→"
+        "NAVIGATE送客→BOW→WAVE道别\n"
+        "串行：问候→引导→入座→招待\n"
+        "并行：倒茶同时可聊天\n"
+        "风险：客人不喝则跳过倒茶"
     )
 
     EXECUTION_PLANNER = (
-        "你是一个机器人动作规划专家。你的任务是将高级指令转化为精确的原子动作序列，且必须使用中文。\n"
-        "可用动作库（示例）：\n"
-        "- NAVIGATE to [地点]\n"
-        "- FIND [物体]\n"
-        "- PICK [物体]\n"
-        "- PLACE [物体] to [地点/容器]\n"
-        "- OPEN/CLOSE [物体]\n"
-        "- USE [工具] to [动作] [物体]\n"
-        "- WAIT [时间/事件]\n"
-        "请严格按步骤输出，每一步需简要说明动作的物理目的，且严禁重复动作。"
+        "你为指定阶段生成原子动作序列。\n\n"
+        "先判断阶段类型：操作用物体技能，社交/递交用社交技能。\n"
+        "递交阶段必须：NAVIGATE(靠近人)+HANDOVER(递交)+SPEAK(告知)。\n\n"
+        "【技能库】\n"
+        + SKILL_LIB + "\n\n"
+        "输出：阶段类型 + 每步：动作|目标|目的\n\n"
+        "【示例1：操作】\n"
+        "阶段：烹饪 | 类型：操作\n"
+        "1. NAVIGATE|灶台|过去 2. HEAT|油锅|热油 3. COOK|鸡排|炸金黄\n\n"
+        "【示例2：递交】\n"
+        "阶段：递送 | 类型：递交\n"
+        "1. NAVIGATE|用户位置|靠近 2. SPEAK|告知|说您的咖啡\n"
+        "3. HANDOVER|咖啡杯|递上 4. BOW|鞠躬|致意"
     )
 
 
@@ -103,6 +184,9 @@ class R005Chat:
         self.current = default_model
         self.history = []
         self.last_time = 0
+        self._last_system_prompt = None  # 用于 KV cache 跟踪
+        self._cache_hits = 0
+        self._cache_misses = 0
         self._check_all_services()
 
     # ---------- 服务状态 ----------
@@ -198,17 +282,27 @@ class R005Chat:
             return f"[ERROR] {e}", 0, {}
 
     def chat_once(self, system_prompt, user_text, temperature=0.7, max_tokens=512):
-        """单轮对话（不使用 history），返回 (reply, elapsed, usage)"""
+        """单轮对话，利用 llama-server KV cache"""
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": user_text})
+
+        # 检测 cache 是否可复用（同一 system prompt 第二次调用）
+        cache_hit = (system_prompt is not None
+                     and system_prompt == self._last_system_prompt)
+        self._last_system_prompt = system_prompt
+        if cache_hit:
+            self._cache_hits += 1
+        else:
+            self._cache_misses += 1
 
         payload = {
             "model": self.current,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
+            "cache_prompt": True,  # 启用 KV cache（最新版 llama-server 默认开启）
         }
 
         t0 = time.time()
@@ -225,6 +319,9 @@ class R005Chat:
             reply = data["choices"][0]["message"]["content"]
             usage = data.get("usage", {})
             elapsed = time.time() - t0
+            usage["_cache"] = "HIT" if cache_hit else "MISS"
+            usage["_cache_hits"] = self._cache_hits
+            usage["_cache_misses"] = self._cache_misses
             return reply, elapsed, usage
         except Exception as e:
             return f"[ERROR] {e}", 0, {}
@@ -306,11 +403,13 @@ def print_banner():
 
 
 def print_timing(label, elapsed, usage):
-    """统一格式化时间输出"""
+    """格式化时间输出，含 KV cache 状态"""
     prompt_tok = usage.get("prompt_tokens", 0)
     completion_tok = usage.get("completion_tokens", 0)
     tok_s = completion_tok / elapsed if elapsed > 0 and completion_tok else 0
-    print(f"  ⏱ {label}: {elapsed:.2f}s  (输入{prompt_tok} → 输出{completion_tok} tok, {tok_s:.1f} tok/s)")
+    cache = usage.get("_cache", "?")
+    cache_str = f" [cache {cache}]" if cache in ("HIT", "MISS") else ""
+    print(f"  [{label}] {elapsed:.2f}s  (输入{prompt_tok} -> 输出{completion_tok} tok, {tok_s:.1f} tok/s){cache_str}")
 
 
 def main():

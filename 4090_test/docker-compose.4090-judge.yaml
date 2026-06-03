@@ -1,0 +1,75 @@
+# ============================================================
+# 4090 WSL — Qwen3-8B-Q8_0 语义评分器 (LLM-as-Judge)
+#
+# 端口: 8084
+# 模型: Qwen3-8B-Q8_0.gguf (8.2GB, ChatML format)
+#
+# 前置 — 停掉 8081/8082 释放 VRAM:
+#   docker compose -f docker-compose.4090.yaml stop qwen35-2b robobrain
+#
+# 启动:
+#   docker compose -f docker-compose.4090-judge.yaml up -d
+#
+# 恢复:
+#   docker compose -f docker-compose.4090-judge.yaml down
+#   docker compose -f docker-compose.4090.yaml start qwen35-2b robobrain
+# ============================================================
+
+services:
+  judge:
+    image: roboagent:4090-cuda
+    container_name: judge-8b-4090
+    hostname: 4090-judge
+    restart: "no"
+
+    ports:
+      - "127.0.0.1:8084:8080"
+      - "192.168.110.143:8084:8080"
+
+    volumes:
+      - /d/EDGE_DOWNLOAD:/app/models:ro
+      - ./logs:/app/logs
+
+    command: >
+      -m /app/models/Qwen3-8B-Q8_0.gguf
+      --host 0.0.0.0
+      --port 8080
+      --ctx-size 131072
+      --threads 8
+      --threads-batch 8
+      --batch-size 4096
+      --ubatch-size 1024
+      --n-gpu-layers 99
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+      --flash-attn on
+      --no-mmap
+      --jinja
+      --reasoning off
+      --verbose
+
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - TZ=Asia/Shanghai
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    networks:
+      - 4090-net
+
+networks:
+  4090-net:
+    driver: bridge
